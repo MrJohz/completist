@@ -3,6 +3,7 @@ use completist::utils::normalise_extension;
 
 pub struct Formatter {
     pub name: String,
+    pub extensions: HashSet<String>,
 }
 
 pub struct FormatterBuilder {
@@ -31,7 +32,10 @@ impl FormatterBuilder {
     }
 
     pub fn build(self) -> Result<Formatter, ()> {
-        Ok(Formatter { name: self.name })
+        Ok(Formatter {
+            name: self.name,
+            extensions: self.extensions,
+        })
     }
 }
 
@@ -61,6 +65,18 @@ mod tests {
 
             builder.exts(&[".fs", ".fishy", ".fish.completion"]);
             assert_eq!(builder.extensions.len(), 6);
+        }
+
+        #[test]
+        fn build_extensions() {
+            let mut builder = FormatterBuilder::new("formatter name");
+            builder.ext(".fish").exts(&[".fsh", "fish-completion"]);
+            let formatter = builder.build().ok().expect("Not all required params filled in");
+            assert_eq!(formatter.extensions.len(), 3);
+
+            let builder = FormatterBuilder::new("formatter name");
+            let formatter = builder.build().ok().expect("Not all required params filled in");
+            assert_eq!(formatter.extensions.len(), 0);
         }
 
     }
