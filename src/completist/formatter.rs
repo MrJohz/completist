@@ -3,7 +3,13 @@ use completist::utils::normalise_extension;
 
 pub struct Formatter {
     pub name: String,
-    pub extensions: HashSet<String>,
+    extensions: HashSet<String>,
+}
+
+impl Formatter {
+    pub fn matches_extension(&self, extension: String) -> bool {
+        self.extensions.contains(&extension)
+    }
 }
 
 pub struct FormatterBuilder {
@@ -25,9 +31,7 @@ impl FormatterBuilder {
     }
 
     pub fn exts(&mut self, exts: &[&str]) -> &mut Self {
-        for ext in exts {
-            self.ext(ext);
-        }
+        for ext in exts { self.ext(ext); }
         self
     }
 
@@ -78,6 +82,19 @@ mod tests {
             let formatter = builder.build().ok().expect("Not all required params filled in");
             assert_eq!(formatter.extensions.len(), 0);
         }
+    }
 
+    mod formatter {
+        use super::*;
+
+        #[test]
+        fn matches_extension() {
+            let mut builder = FormatterBuilder::new("formatter");
+            builder.exts(&[".fish", ".fsh"]);
+            let formatter = builder.build().ok().expect("Not all required params filled in");
+
+            assert!(formatter.matches_extension(".fish".to_string()));
+            assert!(!formatter.matches_extension(".fhs".to_string()));
+        }
     }
 }
