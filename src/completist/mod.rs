@@ -1,3 +1,4 @@
+pub mod io;
 pub mod program;
 pub mod formatter;
 mod utils;
