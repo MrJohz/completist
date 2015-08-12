@@ -101,26 +101,42 @@ impl Opt {
         }
     }
 
+    fn normalize_long(s: String) -> String {
+        if s.starts_with("-") {
+            s
+        } else {
+            format!("--{}", s)
+        }
+    }
+
+    fn normalize_short(s: String) -> String {
+        if s.starts_with("-") {
+            s
+        } else {
+            format!("-{}", s)
+        }
+    }
+
     fn from_toml(table: &toml::Table) -> Option<Self> {
         let description = table.get("description").and_then(|a| a.as_str());
         let argkind = table.get("argkind").and_then(|a| a.as_str());
         let mut long_vec = Vec::new();
         if let Some(long) = table.get("long").and_then(|a| a.as_str()) {
-            long_vec.push(long.to_string());
+            long_vec.push(Self::normalize_long(long.to_string()));
         } else if let Some(longs) = table.get("longs").and_then(|a| a.as_slice()) {
             for long in longs {
                 if let Some(long) = long.as_str() {
-                    long_vec.push(long.to_string());
+                    long_vec.push(Self::normalize_long(long.to_string()));
                 }
             }
         }
         let mut short_vec = Vec::new();
         if let Some(short) = table.get("short").and_then(|a| a.as_str()) {
-            short_vec.push(short.to_string());
+            short_vec.push(Self::normalize_short(short.to_string()));
         } else if let Some(shorts) = table.get("shorts").and_then(|a| a.as_slice()) {
             for short in shorts {
                 if let Some(short) = short.as_str() {
-                    short_vec.push(short.to_string());
+                    short_vec.push(Self::normalize_short(short.to_string()));
                 }
             }
         }
@@ -242,6 +258,34 @@ mod tests {
         assert_eq!(prog.base_command.options[0].shorts[0], "-o");
         assert_eq!(prog.base_command.options[0].description, "desc");
         assert_eq!(prog.base_command.options[0].argkind, Some("FILE".to_string()));
+    }
+
+    #[test]
+    fn normalise_options() {
+        let toml = toml::Parser::new("
+            name = 'test-command'
+            [[option]]
+            long = 'option'
+            short = 'o'
+            description = 'implicit long/short option'
+
+            [[option]]
+            long = '--opt'
+            short = '-o'
+            description = 'normal long/short option'
+
+            [[option]]
+            long = '-myoption'
+            description = 'old-style long option'
+        ").parse().unwrap();
+        let prog = Program::from_toml(&toml).unwrap();
+
+        assert_eq!(prog.base_command.options.len(), 3);
+        assert_eq!(prog.base_command.options[0].longs[0], "--option");
+        assert_eq!(prog.base_command.options[0].shorts[0], "-o");
+        assert_eq!(prog.base_command.options[1].longs[0], "--opt");
+        assert_eq!(prog.base_command.options[1].shorts[0], "-o");
+        assert_eq!(prog.base_command.options[2].longs[0], "-myoption");
     }
 
     #[test]
