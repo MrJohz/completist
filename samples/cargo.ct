@@ -1,0 +1,18 @@
+name = "cargo"
+
+[[command]]
+name = "bench"
+
+[[command.argument]]
+name = "sep"
+kind = "seperator"
+[[command.argument]]
+name = "args"
+kind = "any"
+[[command.option]]
+long = "--lib"
+description = "Benchmark only this package's library"
+[[command.option]]
+long = "--bin"
+argkind = "command(ls target/debug)"
+description = "Benchmark only the specified binary"
