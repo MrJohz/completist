@@ -1,71 +1,33 @@
 use std::io::{stdin, Stdin, stdout, Stdout};
 use std::io::{BufReader, BufWriter};
+pub use std::io::{Read, Write};
 use std::io::Result;
 use std::fs::File;
 
-pub enum Input {
-    StndIn(BufReader<Stdin>),
-    FileIn(BufReader<File>),
-}
+pub type Input = BufReader<Box<Read>>;
 
-impl Input {
-    pub fn open(path: &str) -> Result<Self> {
+pub fn open_input(path: &str) -> Result<Input> {
+    Ok(BufReader::new(
         if path == "--" {
-            Ok(Input::StndIn(BufReader::new(stdin())))
+            Box::new(stdin())
         } else {
-            Ok(Input::FileIn(BufReader::new(try!(File::open(path)))))
-        }
-    }
+            Box::new(try!(File::open(path)))
+        }))
 }
 
-pub enum Output {
-    StndOut(BufWriter<Stdout>),
-    FileOut(BufWriter<File>),
-}
+pub type Output = BufWriter<Box<Write>>;
 
-impl Output {
-    pub fn open(path: &str) -> Result<Self> {
+pub fn open_output(path: &str) -> Result<Output> {
+    Ok(BufWriter::new(
         if path == "--" {
-            Ok(Output::StndOut(BufWriter::new(stdout())))
+            Box::new(stdout())
         } else {
-            Ok(Output::FileOut(BufWriter::new(try!(File::create(path)))))
-        }
-    }
+            Box::new(try!(File::create(path)))
+        }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    extern crate tempdir;
-
-    #[test]
-    fn input_opens_correctly() {
-        let inp = Input::open("--").ok().expect("should always be able to open stdin");
-        match inp {
-            Input::StndIn(_) => assert!(true),
-            Input::FileIn(_) => assert!(false),
-        }
-
-        let tmpdir = tempdir::TempDir::new("input_opens_correctly").unwrap();
-        let inp = Input::open(tmpdir.path().join("nonexistant").to_str().unwrap());
-        assert!(inp.is_err());
-    }
-
-    #[test]
-    fn output_opens_correctly() {
-        let outp = Output::open("--")
-            .ok().expect("should always be able to open stdin");
-        match outp {
-            Output::StndOut(_) => assert!(true),
-            Output::FileOut(_) => assert!(false),
-        }
-
-        let tmpdir = tempdir::TempDir::new("output_opens_correctly").unwrap();
-        let outp = Output::open(tmpdir.path().join("file.txt").to_str().unwrap())
-            .ok().expect("should always be able to open new file");
-        match outp {
-            Output::StndOut(_) => assert!(false),
-            Output::FileOut(_) => assert!(true),
-        }
-    }
+    // TODO: work out how to test that correct inputs and outputs are opened
 }

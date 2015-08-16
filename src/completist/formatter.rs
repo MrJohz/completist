@@ -1,14 +1,48 @@
 use std::collections::HashSet;
+use std::io::Error;
+
 use completist::utils::normalise_extension;
+use completist::io::{Output, Write};
+use completist::program::{Program, Command, Argument, Opt};
 
 pub struct Formatter {
     pub name: String,
     extensions: HashSet<String>,
 }
 
+type FmtResult = Result<(), Error>;
+
 impl Formatter {
     pub fn matches_extension(&self, extension: String) -> bool {
         self.extensions.contains(&extension)
+    }
+
+    pub fn write_header(&self, program: &Program, output: &mut Output) -> FmtResult {
+        // Here I should write the subcommand function to allow anyone to use it
+        Ok(())
+    }
+
+    pub fn write_opt(&self, option: &Opt, output: &mut Output) -> FmtResult {
+        try!(output.write_fmt(format_args!("complete -c '{}' ", self.name)));
+        for short in &option.shorts {
+            try!(output.write_fmt(format_args!("-s '{}'", short)));
+        }
+
+        for long in &option.longs {
+            if long.starts_with("--") {
+                try!(output.write_fmt(format_args!("-l '{}'", long)));
+            } else {  // of form "-option"
+                try!(output.write_fmt(format_args!("-o '{}'", long)));
+            }
+        }
+
+        try!(output.write_fmt(format_args!("-d '{}'", option.description)));
+
+        Ok(())
+    }
+
+    pub fn write_arg(&self, option: &Opt, output: &mut Output) -> FmtResult {
+        Ok(())
     }
 }
 

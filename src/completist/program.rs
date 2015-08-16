@@ -84,10 +84,10 @@ impl Argument {
 }
 
 pub struct Opt {
-    longs: Vec<String>,
-    shorts: Vec<String>,
-    description: String,
-    argkind: Option<String>,
+    pub longs: Vec<String>,
+    pub shorts: Vec<String>,
+    pub description: String,
+    pub argkind: Option<String>,
 }
 
 impl Opt {
