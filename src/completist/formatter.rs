@@ -10,7 +10,7 @@ pub struct Formatter {
     extensions: HashSet<String>,
 }
 
-type FmtResult = Result<(), Error>;
+pub type FmtResult = Result<(), Error>;
 
 impl Formatter {
     pub fn matches_extension(&self, extension: String) -> bool {
