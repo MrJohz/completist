@@ -3,13 +3,10 @@ function __at_level
   set subcommands $argv
   set subcommands_len (count $subcommands)
   if [ (count $cmd) -eq $subcommands_len ]
-    set i 1
-    # TODO: replace this with seq
-    while [ $i -le $subcommands_len ]
+    for i in (seq $subcommands_len)
       if [ $subcommands[$i] != $cmd[$i] ]
         return 1
       end
-      set i (math $i + 1)
     end
     return 0
   end

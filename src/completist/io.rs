@@ -1,4 +1,4 @@
-use std::io::{stdin, Stdin, stdout, Stdout};
+use std::io::{stdin, stdout};
 use std::io::{BufReader, BufWriter};
 pub use std::io::{Read, Write};
 use std::io::Result;

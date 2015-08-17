@@ -5,7 +5,3 @@ authors = ["Jonathan <jonathan.frere@gmail.com>"]
 
 [dependencies]
 toml = "0.1"
-
-[dev-dependencies]
-tempdir = "0.3"
-

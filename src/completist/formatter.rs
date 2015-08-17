@@ -17,31 +17,64 @@ impl Formatter {
         self.extensions.contains(&extension)
     }
 
-    pub fn write_header(&self, program: &Program, output: &mut Output) -> FmtResult {
-        // Here I should write the subcommand function to allow anyone to use it
-        Ok(())
-    }
-
-    pub fn write_opt(&self, option: &Opt, output: &mut Output) -> FmtResult {
-        try!(output.write_fmt(format_args!("complete -c '{}' ", self.name)));
-        for short in &option.shorts {
-            try!(output.write_fmt(format_args!("-s '{}'", short)));
+    pub fn write_comment(&self, output: &mut Output, text: String) -> FmtResult {
+        for line in text.lines() {
+            try!(output.write_fmt(format_args!("# {}", line)));
         }
-
-        for long in &option.longs {
-            if long.starts_with("--") {
-                try!(output.write_fmt(format_args!("-l '{}'", long)));
-            } else {  // of form "-option"
-                try!(output.write_fmt(format_args!("-o '{}'", long)));
-            }
-        }
-
-        try!(output.write_fmt(format_args!("-d '{}'", option.description)));
 
         Ok(())
     }
 
-    pub fn write_arg(&self, option: &Opt, output: &mut Output) -> FmtResult {
+    pub fn write_header(&self, output: &mut Output, program: &Program) -> FmtResult {
+        try!(output.write_fmt(format_args!(r#"
+            function __fish_at_level_{}
+              set cmd (commandline -opc)
+              set subcommands $argv
+              set subcommands_len (count $subcommands)
+              if [ (count $cmd) -eq $subcommands_len ]
+                for i in (seq $subcommands_len)
+                  if [ $subcommands[$i] != $cmd[$i] ]
+                    return 1
+                  end
+                end
+                return 0
+              end
+
+              return 1
+            end\n"#, program.name)));
+        Ok(())
+    }
+
+    pub fn write_begin(&self, out: &mut Output, prog: &Program) -> FmtResult {
+        try!(out.write_fmt(format_args!("complete -c '{}' ", prog.name)));
+        Ok(())
+    }
+
+    pub fn write_level(&self, out: &mut Output, prog: &Program, lvl: &[String]) -> FmtResult {
+        try!(out.write_fmt(format_args!(" -n '__fish_at_level_{} {}' ",
+            prog.name, lvl.join(" "))));
+        Ok(())
+    }
+
+    pub fn write_opt(&self, out: &mut Output, opt: &Opt) -> FmtResult {
+        for short in &opt.shorts {
+            try!(out.write_fmt(format_args!(" -s '{}' ", short)));
+        }
+
+        for long in &opt.longs {
+            try!(out.write_fmt(format_args!(" -{} '{}' ",
+                (if long.starts_with("--") {"l"} else {"o"}), long)));
+        }
+
+        Ok(())
+    }
+
+    pub fn write_opt_description(&self, out: &mut Output, opt: &Opt) -> FmtResult {
+        try!(out.write_fmt(format_args!(" -d '{}' ", opt.description)));
+        Ok(())
+    }
+
+    pub fn write_opt_arguments(&self, out: &mut Output, opt: &Opt) -> FmtResult {
         Ok(())
     }
 }
