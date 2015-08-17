@@ -52,7 +52,7 @@ impl Formatter {
 
     pub fn write_level(&self, out: &mut Output, prog: &Program, lvl: &[String]) -> FmtResult {
         try!(out.write_fmt(format_args!(" -n '__fish_at_level_{} {}' ",
-            prog.name, lvl.join(" "))));
+            prog.name, lvl.connect(" "))));
         Ok(())
     }
 
