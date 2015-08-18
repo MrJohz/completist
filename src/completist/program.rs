@@ -7,6 +7,7 @@ extern crate regex;
 pub enum OptKind {
     File,
     FilePlus,
+    OneOf(String),
     Command(String),
     Function(String),
 }
@@ -18,6 +19,10 @@ pub fn construct_optkind(inp: &str) -> Option<OptKind> {
         \)$").unwrap();
     let cmdre = regex::Regex::new(r"(?xs)
         ^(?i:command)\(
+            ( (?: [^\\)(] | \\\( | \\\) | \\\\ )* )
+        \)$").unwrap();
+    let oneofre = regex::Regex::new(r"(?xs)
+        ^(?i:oneof|one_of)\(
             ( (?: [^\\)(] | \\\( | \\\) | \\\\ )* )
         \)$").unwrap();
 
@@ -33,6 +38,12 @@ pub fn construct_optkind(inp: &str) -> Option<OptKind> {
             .to_string()))
     } else if let Some(capture) = fnre.captures(inp).and_then(|i| i.at(1)) {
         Some(OptKind::Function(capture
+            .replace("\\(", "(")
+            .replace("\\)", ")")
+            .replace("\\\\", "\\")
+            .to_string()))
+    } else if let Some(capture) = oneofre.captures(inp).and_then(|i| i.at(1)) {
+        Some(OptKind::OneOf(capture
             .replace("\\(", "(")
             .replace("\\)", ")")
             .replace("\\\\", "\\")

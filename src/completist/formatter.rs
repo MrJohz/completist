@@ -3,7 +3,7 @@ use std::io::Error;
 
 use completist::utils::normalise_extension;
 use completist::io::{Output, Write};
-use completist::program::{Program, Command, Argument, Opt};
+use completist::program::{Program, Command, Argument, Opt, OptKind};
 
 pub struct Formatter {
     pub name: String,
@@ -75,6 +75,22 @@ impl Formatter {
     }
 
     pub fn write_opt_arguments(&self, out: &mut Output, opt: &Opt) -> FmtResult {
+        if let Some(ref argkind) = opt.argkind {
+            match argkind {
+                &OptKind::File =>
+                    try!(out.write_fmt(format_args!(" -r "))),
+                &OptKind::FilePlus =>
+                    try!(out.write_fmt(format_args!(" -r -a '--'"))),
+                &OptKind::OneOf(ref args) =>
+                    try!(out.write_fmt(
+                        format_args!(" -r -a '{}'", args.replace(r"'", r"\'")))),
+                &OptKind::Command(ref cmd) =>
+                    try!(out.write_fmt(format_args!(" -r -a '({})'", cmd))),
+                &OptKind::Function(ref func) =>
+                    try!(out.write_fmt(
+                        format_args!(" -x -a '(__fish_completist_func_{})", func)))
+            }
+        }
         Ok(())
     }
 }
