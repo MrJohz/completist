@@ -1,447 +1,142 @@
 use std::ascii::AsciiExt;
-
-extern crate toml;
 extern crate regex;
+extern crate shlex;
+
+type CompResult<'a, T> = Result<T, String>;
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum OptKind {
+pub enum ArgKind {
     File,
     FilePlus,
-    OneOf(String),
+    OneOf(Vec<String>),
     Command(String),
     Function(String),
 }
 
-pub fn construct_optkind(inp: &str) -> Option<OptKind> {
-    let fnre = regex::Regex::new(r"(?xs)
-        ^(?i:function)\(
-            ( (?: [^\\)(] | \\\( | \\\) | \\\\ )* )
-        \)$").unwrap();
-    let cmdre = regex::Regex::new(r"(?xs)
-        ^(?i:command)\(
-            ( (?: [^\\)(] | \\\( | \\\) | \\\\ )* )
-        \)$").unwrap();
-    let oneofre = regex::Regex::new(r"(?xs)
-        ^(?i:oneof|one_of)\(
-            ( (?: [^\\)(] | \\\( | \\\) | \\\\ )* )
-        \)$").unwrap();
-
-    if inp.eq_ignore_ascii_case("file") {
-        Some(OptKind::File)
-    } else if inp.eq_ignore_ascii_case("file+") {
-        Some(OptKind::FilePlus)
-    } else if let Some(capture) = cmdre.captures(inp).and_then(|i| i.at(1)) {
-        Some(OptKind::Command(capture
-            .replace("\\(", "(")
-            .replace("\\)", ")")
-            .replace("\\\\", "\\")
-            .to_string()))
-    } else if let Some(capture) = fnre.captures(inp).and_then(|i| i.at(1)) {
-        Some(OptKind::Function(capture
-            .replace("\\(", "(")
-            .replace("\\)", ")")
-            .replace("\\\\", "\\")
-            .to_string()))
-    } else if let Some(capture) = oneofre.captures(inp).and_then(|i| i.at(1)) {
-        Some(OptKind::OneOf(capture
-            .replace("\\(", "(")
-            .replace("\\)", ")")
-            .replace("\\\\", "\\")
-            .to_string()))
-    } else {
-        None
-    }
+#[derive(Debug, PartialEq, Eq)]
+pub struct Opt {
+    longs: Vec<String>,
+    shorts: Vec<String>,
+    argument: Arg,
 }
 
-pub struct Command {
+#[derive(Debug, PartialEq, Eq)]
+pub struct Arg {
     name: String,
-    arguments: Vec<Argument>,
-    options: Vec<Opt>,
-    commands: Vec<Command>,
+    kind: ArgKind,
+    required: bool,
+    exclusive: bool,
 }
 
-impl Command {
-    fn new(name: &str) -> Self {
-        Command {
-            name: name.to_string(),
-            arguments: Vec::new(),
-            options: Vec::new(),
-            commands: Vec::new(),
+impl Arg {
+    fn capture_regex<F>(inp: &str, re: regex::Regex, former: F) -> Option<ArgKind>
+        where F : Fn(String) -> Option<ArgKind> {
+
+        if let Some(capture) = re.captures(inp).and_then(|i| i.at(1)) {
+            former(capture
+                .replace(r"\(", r"(")
+                .replace(r"\)", r")")
+                .replace(r"\\", r"\"))
+        } else {
+            None
         }
     }
 
-    fn from_toml(data: &toml::Table) -> Option<Self> {
-        let name = match data.get("name").and_then(|name| name.as_str()) {
-            Some(name) => name,
-            None => return None,
+    fn parse_argkind(inp: &str) -> CompResult<ArgKind> {
+        let fnre = regex::Regex::new(r"(?xs)
+            ^(?i:function)\(
+                ( (?: [^\\)(] | \\\( | \\\) | \\\\ )* )
+            \)$").unwrap();
+        let fn_conv = |x: String| {
+            Some(ArgKind::Function(x))
+        };
+        let cmdre = regex::Regex::new(r"(?xs)
+            ^(?i:command)\(
+                ( (?: [^\\)(] | \\\( | \\\) | \\\\ )* )
+            \)$").unwrap();
+        let cmd_conv = |x: String| {
+            Some(ArgKind::Command(x))
+        };
+        let oneofre = regex::Regex::new(r"(?xs)
+            ^(?i:oneof|one_of)\(
+                ( (?: [^\\)(] | \\\( | \\\) | \\\\ )* )
+            \)$").unwrap();
+        let oneof_conv = |x: String| {
+            shlex::split(&*x).map(|i| ArgKind::OneOf(i))
         };
 
-        let mut command = Self::new(name);
-
-        if let Some(arguments) = data.get("argument").and_then(|a| a.as_slice()) {
-            for argument in arguments {
-                match argument.as_table().and_then(|t| Argument::from_toml(t)) {
-                    Some(argument) => command.arguments.push(argument),
-                    None => continue,
-                }
-            }
+        if inp.eq_ignore_ascii_case("file") {
+            Ok(ArgKind::File)
+        } else if inp.eq_ignore_ascii_case("file+") {
+            Ok(ArgKind::FilePlus)
+        } else if let Some(capture) = Self::capture_regex(inp, fnre, fn_conv) {
+            Ok(capture)
+        } else if let Some(capture) = Self::capture_regex(inp, cmdre, cmd_conv) {
+            Ok(capture)
+        } else if let Some(capture) = Self::capture_regex(inp, oneofre, oneof_conv) {
+            Ok(capture)
+        } else {
+            Err(format!("Unrecognised arg kind {}", inp))
         }
-
-        if let Some(options) = data.get("option").and_then(|a| a.as_slice()) {
-            for option in options {
-                match option.as_table().and_then(|t| Opt::from_toml(t)) {
-                    Some(option) => command.options.push(option),
-                    None => continue,
-                }
-            }
-        }
-
-        if let Some(commands) = data.get("command").and_then(|a| a.as_slice()) {
-            for subcommand in commands {
-                match subcommand.as_table().and_then(|t| Command::from_toml(t)) {
-                    Some(subcommand) => command.commands.push(subcommand),
-                    None => continue,
-                }
-            }
-        }
-
-        Some(command)
     }
 }
 
-pub struct Argument {
+#[derive(Debug, PartialEq, Eq)]
+pub struct Subcmd {
     name: String,
-    kind: OptKind,
-    optional: bool,
 }
 
-impl Argument {
-    fn new(name: &str, kind: OptKind, optional: bool) -> Self {
-        Argument {
-            name: name.to_string(),
-            kind: kind,
-            optional: optional,
-        }
-    }
-
-    fn from_toml(table: &toml::Table) -> Option<Self> {
-        let name = table.get("name")
-            .and_then(|a| a.as_str());
-        let kind = table.get("kind")
-            .and_then(|a| a.as_str())
-            .and_then(|a| construct_optkind(a));
-        let optional = table.get("optional")
-            .and_then(|a| a.as_bool());
-        if name.is_some() && kind.is_some() {
-            Some(Argument::new(name.unwrap(), kind.unwrap(), optional.unwrap_or(false)))
-        } else {
-            None
-        }
-    }
+#[derive(Debug, PartialEq, Eq)]
+pub enum CompKind {
+    Opt(Opt),
+    Arg(Arg),
+    Subcmd(Subcmd),
 }
 
-pub struct Opt {
-    pub longs: Vec<String>,
-    pub shorts: Vec<String>,
-    pub description: String,
-    pub argkind: Option<OptKind>,
+#[derive(Debug, PartialEq, Eq)]
+pub struct Completion {
+    command: String,
+    subcommand: Vec<String>,
+    completion_kind: CompKind,
+    description: String,
 }
 
-impl Opt {
-    fn new(longs: Vec<String>, shorts: Vec<String>,
-            description: &str, argkind: Option<OptKind>) -> Self {
-        Opt {
-            longs: longs,
-            shorts: shorts,
-            description: description.to_string(),
-            argkind: argkind,
+impl Completion {
+    fn new(cmd: String, path: Vec<String>, kind: CompKind, desc: String) -> Self {
+        Completion {
+            command: cmd,
+            subcommand: path,
+            completion_kind: kind,
+            description: desc,
         }
-    }
-
-    fn normalize_long(s: String) -> String {
-        if s.starts_with("-") {
-            s
-        } else {
-            format!("--{}", s)
-        }
-    }
-
-    fn normalize_short(s: String) -> String {
-        if s.starts_with("-") {
-            s
-        } else {
-            format!("-{}", s)
-        }
-    }
-
-    fn from_toml(table: &toml::Table) -> Option<Self> {
-        let description = table.get("description")
-            .and_then(|a| a.as_str());
-        let argkind = table.get("argkind")
-            .and_then(|a| a.as_str())
-            .and_then(|a| construct_optkind(a));
-        let mut long_vec = Vec::new();
-        if let Some(long) = table.get("long").and_then(|a| a.as_str()) {
-            long_vec.push(Self::normalize_long(long.to_string()));
-        } else if let Some(longs) = table.get("longs").and_then(|a| a.as_slice()) {
-            for long in longs {
-                if let Some(long) = long.as_str() {
-                    long_vec.push(Self::normalize_long(long.to_string()));
-                }
-            }
-        }
-        let mut short_vec = Vec::new();
-        if let Some(short) = table.get("short").and_then(|a| a.as_str()) {
-            short_vec.push(Self::normalize_short(short.to_string()));
-        } else if let Some(shorts) = table.get("shorts").and_then(|a| a.as_slice()) {
-            for short in shorts {
-                if let Some(short) = short.as_str() {
-                    short_vec.push(Self::normalize_short(short.to_string()));
-                }
-            }
-        }
-
-        if description.is_some() && (short_vec.len() > 0 || long_vec.len() > 0) {
-            Some(Self::new(long_vec, short_vec, description.unwrap(), argkind))
-        } else {
-            None
-        }
-    }
-}
-
-pub struct Program {
-    pub name: String,
-    base_command: Command,
-}
-
-impl Program {
-    fn new(name: &str, base_command: Command) -> Self {
-        Program {
-            name: name.to_string(),
-            base_command: base_command,
-        }
-    }
-
-    pub fn from_toml(data: &toml::Table) -> Result<Self, ()> {
-        let base_command = try!(Command::from_toml(data).ok_or(()));
-
-        let name = try!(data.get("name").ok_or(()));
-        let name = try!(name.as_str().ok_or(()));
-        let prog = Self::new(name, base_command);
-        Ok(prog)
     }
 }
 
 #[cfg(test)]
-mod tests {
-    extern crate toml;
+pub mod tests {
     use super::*;
 
     #[test]
-    fn create_program() {
-        let toml = toml::Parser::new("name = 'test-command'").parse().unwrap();
-        let prog = Program::from_toml(&toml).unwrap();
-
-        assert_eq!(prog.name, "test-command");
-        assert_eq!(prog.base_command.name, "test-command");
-    }
-
-    #[test]
-    fn create_program_with_arguments() {
-        let toml = toml::Parser::new("
-            name = 'test-command'
-            [[argument]]
-            name = 'FILE'
-            kind = 'file+'
-            optional = true
-        ").parse().unwrap();
-        let prog = Program::from_toml(&toml).unwrap();
-
-        assert_eq!(prog.base_command.arguments.len(), 1);
-        assert_eq!(prog.base_command.arguments[0].name, "FILE");
-        assert_eq!(prog.base_command.arguments[0].kind, OptKind::FilePlus);
-        assert_eq!(prog.base_command.arguments[0].optional, true);
-
-        let toml = toml::Parser::new("
-            name = 'test-command'
-            [[argument]]
-            name = 'FILE'
-            kind = 'file+'
-        ").parse().unwrap();
-        let prog = Program::from_toml(&toml).unwrap();
-
-        assert_eq!(prog.base_command.arguments.len(), 1);
-        assert_eq!(prog.base_command.arguments[0].name, "FILE");
-        assert_eq!(prog.base_command.arguments[0].kind, OptKind::FilePlus);
-        assert_eq!(prog.base_command.arguments[0].optional, false);
-    }
-
-    #[test]
-    fn different_argkinds() {
-        let toml = toml::Parser::new("
-            name = 'test-command'
-            [[argument]]
-            name = 'FILE'
-            kind = 'fILe'  # should be case-insensitive
-        ").parse().unwrap();
-        let prog = Program::from_toml(&toml).unwrap();
-        assert_eq!(prog.base_command.arguments.len(), 1);
-        assert_eq!(prog.base_command.arguments[0].kind, OptKind::File);
-
-        let toml = toml::Parser::new("
-            name = 'test-command'
-            [[argument]]
-            name = 'FILE'
-            kind = 'file+'
-        ").parse().unwrap();
-        let prog = Program::from_toml(&toml).unwrap();
-        assert_eq!(prog.base_command.arguments.len(), 1);
-        assert_eq!(prog.base_command.arguments[0].kind, OptKind::FilePlus);
-
-        let toml = toml::Parser::new(r"
-            name = 'test-command'
-            [[argument]]
-            name = 'FILE'
-            kind = 'function(can contain \( and \) inside)'
-        ").parse().unwrap();
-        let prog = Program::from_toml(&toml).unwrap();
-        assert_eq!(prog.base_command.arguments.len(), 1);
-        assert_eq!(prog.base_command.arguments[0].kind,
-            OptKind::Function("can contain ( and ) inside".to_string()));
-
-        let toml = toml::Parser::new(r"
-            name = 'test-command'
-            [[argument]]
-            name = 'FILE'
-            kind = 'command(can contain escaped \\ inside)'
-        ").parse().unwrap();
-        let prog = Program::from_toml(&toml).unwrap();
-        assert_eq!(prog.base_command.arguments.len(), 1);
-        assert_eq!(prog.base_command.arguments[0].kind,
-            OptKind::Command("can contain escaped \\ inside".to_string()));
-
-        let toml = toml::Parser::new(r"
-            name = 'test-command'
-            [[argument]]
-            name = 'FILE'
-            kind = 'command(escaping \\\( \\\\ rules \\)'
-        ").parse().unwrap();
-        let prog = Program::from_toml(&toml).unwrap();
-        assert_eq!(prog.base_command.arguments.len(), 1);
-        assert_eq!(prog.base_command.arguments[0].kind,
-            OptKind::Command("escaping \\( \\\\ rules \\".to_string()));
-
-        let toml = toml::Parser::new(r"
-            name = 'test-command'
-            [[argument]]
-            name = 'FILE'
-            kind = 'command(err: unescaped \ inside)'
-        ").parse().unwrap();
-        let prog = Program::from_toml(&toml).unwrap();
-        assert_eq!(prog.base_command.arguments.len(), 0);
-
-        let toml = toml::Parser::new(r"
-            name = 'test-command'
-            [[argument]]
-            name = 'FILE'
-            kind = 'function(err: unescaped ( & ) inside)'
-        ").parse().unwrap();
-        let prog = Program::from_toml(&toml).unwrap();
-        assert_eq!(prog.base_command.arguments.len(), 0);
-
-        let toml = toml::Parser::new(r"
-            name = 'test-command'
-            [[argument]]
-            name = 'FILE'
-            kind = 'unrecognised kind'
-        ").parse().unwrap();
-        let prog = Program::from_toml(&toml).unwrap();
-        assert_eq!(prog.base_command.arguments.len(), 0);
-    }
-
-    #[test]
-    fn create_program_with_options() {
-        let toml = toml::Parser::new("
-            name = 'test-command'
-            [[option]]
-            long = '--option'
-            short = '-o'
-            description = 'desc'
-        ").parse().unwrap();
-        let prog = Program::from_toml(&toml).unwrap();
-
-        assert_eq!(prog.base_command.options.len(), 1);
-        assert_eq!(prog.base_command.options[0].longs.len(), 1);
-        assert_eq!(prog.base_command.options[0].longs[0], "--option");
-        assert_eq!(prog.base_command.options[0].shorts.len(), 1);
-        assert_eq!(prog.base_command.options[0].shorts[0], "-o");
-        assert_eq!(prog.base_command.options[0].description, "desc");
-        assert_eq!(prog.base_command.options[0].argkind, None);
-
-        let toml = toml::Parser::new("
-            name = 'test-command'
-            [[option]]
-            longs = ['--option']
-            shorts = ['-o']
-            argkind = 'FILE'
-            description = 'desc'
-        ").parse().unwrap();
-        let prog = Program::from_toml(&toml).unwrap();
-
-        assert_eq!(prog.base_command.options.len(), 1);
-        assert_eq!(prog.base_command.options[0].longs.len(), 1);
-        assert_eq!(prog.base_command.options[0].longs[0], "--option");
-        assert_eq!(prog.base_command.options[0].shorts.len(), 1);
-        assert_eq!(prog.base_command.options[0].shorts[0], "-o");
-        assert_eq!(prog.base_command.options[0].description, "desc");
-        assert_eq!(prog.base_command.options[0].argkind, Some(OptKind::File));
-    }
-
-    #[test]
-    fn normalise_options() {
-        let toml = toml::Parser::new("
-            name = 'test-command'
-            [[option]]
-            long = 'option'
-            short = 'o'
-            description = 'implicit long/short option'
-
-            [[option]]
-            long = '--opt'
-            short = '-o'
-            description = 'normal long/short option'
-
-            [[option]]
-            long = '-myoption'
-            description = 'old-style long option'
-        ").parse().unwrap();
-        let prog = Program::from_toml(&toml).unwrap();
-
-        assert_eq!(prog.base_command.options.len(), 3);
-        assert_eq!(prog.base_command.options[0].longs[0], "--option");
-        assert_eq!(prog.base_command.options[0].shorts[0], "-o");
-        assert_eq!(prog.base_command.options[1].longs[0], "--opt");
-        assert_eq!(prog.base_command.options[1].shorts[0], "-o");
-        assert_eq!(prog.base_command.options[2].longs[0], "-myoption");
-    }
-
-    #[test]
-    fn create_program_with_subcommands() {
-        let toml = toml::Parser::new("
-            name = 'test-command'
-            [[command]]
-            name = 'sub-command'
-            [[command.argument]]
-            name = 'FILE'
-            kind = 'FILE+'
-            [[command.option]]
-            longs = ['--option']
-            description = 'desc'
-        ").parse().unwrap();
-        let prog = Program::from_toml(&toml).unwrap();
-
-        assert_eq!(prog.base_command.commands.len(), 1);
-        assert_eq!(prog.base_command.commands[0].arguments.len(), 1);
-        assert_eq!(prog.base_command.commands[0].options.len(), 1);
+    fn parse_argkind() {
+        let kind = Arg::parse_argkind("FILE").unwrap();
+        assert_eq!(kind, ArgKind::File);
+        let kind = Arg::parse_argkind("FiLe").unwrap();
+        assert_eq!(kind, ArgKind::File);
+        let kind = Arg::parse_argkind("FILE+").unwrap();
+        assert_eq!(kind, ArgKind::FilePlus);
+        let kind = Arg::parse_argkind("oneof(a b c)").unwrap();
+        assert_eq!(kind, ArgKind::OneOf(
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]));
+        let kind = Arg::parse_argkind("one_of(a b c)").unwrap();
+        assert_eq!(kind, ArgKind::OneOf(
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]));
+        let kind = Arg::parse_argkind("on_e_of(a b c d)");
+        assert!(kind.is_err());
+        let kind = Arg::parse_argkind("function(a b c d)").unwrap();
+        assert_eq!(kind, ArgKind::Function("a b c d".to_string()));
+        let kind = Arg::parse_argkind("command(a b c d)").unwrap();
+        assert_eq!(kind, ArgKind::Command("a b c d".to_string()));
+        let kind = Arg::parse_argkind("unrecognised input");
+        assert!(kind.is_err());
     }
 }

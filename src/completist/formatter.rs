@@ -2,8 +2,6 @@ use std::collections::HashSet;
 use std::io::Error;
 
 use completist::utils::normalise_extension;
-use completist::io::{Output, Write};
-use completist::program::{Program, Command, Argument, Opt, OptKind};
 
 pub struct Formatter {
     pub name: String,
@@ -15,83 +13,6 @@ pub type FmtResult = Result<(), Error>;
 impl Formatter {
     pub fn matches_extension(&self, extension: String) -> bool {
         self.extensions.contains(&extension)
-    }
-
-    pub fn write_comment(&self, output: &mut Output, text: String) -> FmtResult {
-        for line in text.lines() {
-            try!(output.write_fmt(format_args!("# {}", line)));
-        }
-
-        Ok(())
-    }
-
-    pub fn write_header(&self, output: &mut Output, program: &Program) -> FmtResult {
-        try!(output.write_fmt(format_args!(r#"
-            function __fish_at_level_{}
-              set cmd (commandline -opc)
-              set subcommands $argv
-              set subcommands_len (count $subcommands)
-              if [ (count $cmd) -eq $subcommands_len ]
-                for i in (seq $subcommands_len)
-                  if [ $subcommands[$i] != $cmd[$i] ]
-                    return 1
-                  end
-                end
-                return 0
-              end
-
-              return 1
-            end\n"#, program.name)));
-        Ok(())
-    }
-
-    pub fn write_begin(&self, out: &mut Output, prog: &Program) -> FmtResult {
-        try!(out.write_fmt(format_args!("complete -c '{}' ", prog.name)));
-        Ok(())
-    }
-
-    pub fn write_level(&self, out: &mut Output, prog: &Program, lvl: &[String]) -> FmtResult {
-        try!(out.write_fmt(format_args!(" -n '__fish_at_level_{} {}' ",
-            prog.name, lvl.connect(" "))));
-        Ok(())
-    }
-
-    pub fn write_opt(&self, out: &mut Output, opt: &Opt) -> FmtResult {
-        for short in &opt.shorts {
-            try!(out.write_fmt(format_args!(" -s '{}' ", short)));
-        }
-
-        for long in &opt.longs {
-            try!(out.write_fmt(format_args!(" -{} '{}' ",
-                (if long.starts_with("--") {"l"} else {"o"}), long)));
-        }
-
-        Ok(())
-    }
-
-    pub fn write_opt_description(&self, out: &mut Output, opt: &Opt) -> FmtResult {
-        try!(out.write_fmt(format_args!(" -d '{}' ", opt.description)));
-        Ok(())
-    }
-
-    pub fn write_opt_arguments(&self, out: &mut Output, opt: &Opt) -> FmtResult {
-        if let Some(ref argkind) = opt.argkind {
-            match argkind {
-                &OptKind::File =>
-                    try!(out.write_fmt(format_args!(" -r "))),
-                &OptKind::FilePlus =>
-                    try!(out.write_fmt(format_args!(" -r -a '--'"))),
-                &OptKind::OneOf(ref args) =>
-                    try!(out.write_fmt(
-                        format_args!(" -r -a '{}'", args.replace(r"'", r"\'")))),
-                &OptKind::Command(ref cmd) =>
-                    try!(out.write_fmt(format_args!(" -r -a '({})'", cmd))),
-                &OptKind::Function(ref func) =>
-                    try!(out.write_fmt(
-                        format_args!(" -x -a '(__fish_completist_func_{})", func)))
-            }
-        }
-        Ok(())
     }
 }
 

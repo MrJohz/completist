@@ -6,3 +6,4 @@ authors = ["Jonathan <jonathan.frere@gmail.com>"]
 [dependencies]
 toml = "0.1.*"
 regex = "0.1.*"
+shlex = "0.1.*"
