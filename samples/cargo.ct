@@ -9,10 +9,11 @@ name = "args"
 kind = "none"
 
 [["cargo.bench".option]]
-long = "--lib"
+opt = "--lib"
 description = "Benchmark only this package's library"
+argument = "none"
 
 [["cargo.bench".option]]
-long = "--bin"
-argkind = "command(ls target/debug)"
+opt = "--bin"
+argument = "command(ls target/debug)"
 description = "Benchmark only the specified binary"

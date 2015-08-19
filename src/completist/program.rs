@@ -16,16 +16,14 @@ pub enum ArgKind {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Opt {
-    longs: Vec<String>,
-    shorts: Vec<String>,
-    argument: Option<Arg>,
+    opts: Vec<String>,
+    argument: Option<ArgKind>,
 }
 
 impl Opt {
-    pub fn new(longs: Vec<String>, shorts: Vec<String>, argument: Option<Arg>) -> Self {
+    pub fn new(opts: Vec<String>, argument: Option<ArgKind>) -> Self {
         Opt {
-            longs: longs,
-            shorts: shorts,
+            opts: opts,
             argument: argument,
         }
     }
@@ -33,7 +31,6 @@ impl Opt {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Arg {
-    name: String,
     kind: ArgKind,
     required: bool,
     exclusive: bool,
@@ -107,7 +104,7 @@ pub enum CompKind {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Completion {
     command: String,
-    subcommand: Vec<String>,
+    path: Vec<String>,
     completion_kind: CompKind,
     description: String,
 }
@@ -116,7 +113,7 @@ impl Completion {
     fn new(cmd: String, path: Vec<String>, kind: CompKind, desc: String) -> Self {
         Completion {
             command: cmd,
-            subcommand: path,
+            path: path,
             completion_kind: kind,
             description: desc,
         }
@@ -131,32 +128,55 @@ impl Completion {
     fn build_opt(cmd: String, path: Vec<String>, toml: &toml::Table)
         -> CompResult<Self> {
 
-        let mut longs = Vec::new();
-        let mut shorts = Vec::new();
+        let mut opts = Vec::new();
 
-        match toml.get("long") {
-            Some(l) => {
-                longs.push(try!(l.as_str()
-                    .map(|l| l.to_string())
-                    .ok_or(format!(
-                        "value for 'short' (path: {p:?}) must be of type str: {l:?}",
-                        p = path, l = l))));
-            }
-            None => {},
+        if let Some(o) = toml.get("opt") {
+            opts.push(try!(o.as_str()
+                .map(|o| o.to_string())
+                .ok_or(format!(
+                    "value for 'opt' (path: {p:?}) must be of type str: {o:?}",
+                    p = path, o = o))));
         };
 
-        match toml.get("short") {
-            Some(s) => {
-                shorts.push(try!(s.as_str()
-                    .map(|s| s.to_string())
+        if let Some(os) = toml.get("opts") {
+            let os = try!(os.as_slice()
+                .ok_or(format!(
+                    "value for 'opts' (path: {p:?}) must be of type list: {os:?}",
+                    p=path, os=os)));
+            for opt in os {
+                opts.push(try!(opt.as_str()
+                    .map(|o| o.to_string())
                     .ok_or(format!(
-                        "value for 'short' (path: {p:?}) must be of type str: {s:?}",
-                        p = path, s = s))));
-            },
-            None => {},
+                        "value for 'opts' (path: {p:?}) must be list of str: {os:?}",
+                        p = path, os = os))));
+            }
         }
 
-        Err(format!("incomplete"))
+        let argument =
+            match toml.get("argument") {
+                Some(arg) =>
+                    Some(try!(arg
+                        .as_str()
+                        .ok_or(format!(
+                            "value for 'argument' (path: {p:?}) must be str: {a:?}",
+                            p = path, a = arg))
+                        .and_then(|arg| Arg::parse_argkind(arg)))),
+                None =>
+                    None,
+            };
+
+        let completion_kind = CompKind::Opt(Opt::new(opts, argument));
+        let desc = try!(toml
+            .get("description")
+            .ok_or(format!(
+                "option missing required key 'description' (path: {p:?})",
+                p = path))
+            .and_then(|desc| desc.as_str().ok_or(format!(
+                "value for 'description' (path: {p:?}) must be str: {d:?}",
+                p = path, d = desc)))
+            .map(|desc| desc.to_string()));
+
+        Ok(Self::new(cmd, path, completion_kind, desc))
     }
 
     pub fn from_toml(toml: &toml::Table) -> CompResult<Vec<Self>> {
@@ -198,13 +218,22 @@ pub mod tests {
     extern crate toml;
 
     #[test]
-    fn completion_from_toml() {
+    fn completion_opt_from_toml() {
         let toml = toml::Parser::new("
             [[prog.option]]
-            long = '--lib'
+            opt = '--lib'
             description = 'option'").parse().expect("TOML could not be parsed");
         let completions = Completion::from_toml(&toml).unwrap();
-        assert_eq!(completions.len(), 1)
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].command, "prog".to_string());
+        assert_eq!(completions[0].path, vec!["prog".to_string()]);
+        assert_eq!(completions[0].description, "option".to_string());
+        if let CompKind::Opt(ref opt) = completions[0].completion_kind {
+            assert_eq!(opt.opts, vec!["--lib".to_string()]);
+            assert_eq!(opt.argument, None);
+        } else {
+            panic!("Wrong CompKind returned");
+        }
     }
 
     #[test]
