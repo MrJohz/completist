@@ -1,11 +1,9 @@
 ["cargo.bench"]
 
 [["cargo.bench".argument]]
-name = "sep"
 kind = "seperator"
 
 [["cargo.bench".argument]]
-name = "args"
 kind = "none"
 
 [["cargo.bench".option]]

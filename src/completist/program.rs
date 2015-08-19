@@ -9,6 +9,8 @@ pub type CompResult<'a, T> = Result<T, String>;
 pub enum ArgKind {
     File,
     FilePlus,
+    Anything,
+    Separator,
     OneOf(Vec<String>),
     Command(String),
     Function(String),
@@ -21,7 +23,7 @@ pub struct Opt {
 }
 
 impl Opt {
-    pub fn new(opts: Vec<String>, argument: Option<ArgKind>) -> Self {
+    fn new(opts: Vec<String>, argument: Option<ArgKind>) -> Self {
         Opt {
             opts: opts,
             argument: argument,
@@ -33,10 +35,18 @@ impl Opt {
 pub struct Arg {
     kind: ArgKind,
     required: bool,
-    exclusive: bool,
+    usefiles: bool,
 }
 
 impl Arg {
+    fn new(kind: ArgKind, required: bool, usefiles: bool) -> Self {
+        Arg {
+            kind: kind,
+            required: required,
+            usefiles: usefiles,
+        }
+    }
+
     fn capture_regex<F>(inp: &str, re: regex::Regex, former: F) -> Option<ArgKind>
         where F : Fn(String) -> Option<ArgKind> {
 
@@ -77,6 +87,10 @@ impl Arg {
             Ok(ArgKind::File)
         } else if inp.eq_ignore_ascii_case("file+") {
             Ok(ArgKind::FilePlus)
+        } else if inp.eq_ignore_ascii_case("separator") {
+            Ok(ArgKind::Separator)
+        } else if inp.eq_ignore_ascii_case("anything") {
+            Ok(ArgKind::Anything)
         } else if let Some(capture) = Self::capture_regex(inp, fnre, fn_conv) {
             Ok(capture)
         } else if let Some(capture) = Self::capture_regex(inp, cmdre, cmd_conv) {
@@ -122,7 +136,45 @@ impl Completion {
     fn build_arg(cmd: String, path: Vec<String>, toml: &toml::Table)
         -> CompResult<Self> {
 
-        Err("incomplete!".to_string())
+        let kind = try!(toml
+            .get("kind")
+            .ok_or(format!(
+                "missing required option 'kind' (path: {p:?})", p = path))
+            .and_then(|kind| kind.as_str().ok_or(format!(
+                "value for 'kind' (path: {p:?}) must be of type str: {k:?}",
+                p = path, k = kind)))
+            .and_then(|kind| Arg::parse_argkind(kind)));
+        let required = match toml.get("required") {
+            Some(required) =>
+                try!(required
+                    .as_bool()
+                    .ok_or(format!(
+                        "value for 'required' (path: {p:?}) must be of type bool: {r:?}",
+                        p = path, r = required))),
+            None => false,
+        };
+        let usefiles = match toml.get("usefiles") {
+            Some(usefiles) =>
+                try!(usefiles
+                    .as_bool()
+                    .ok_or(format!(
+                        "value for 'usefiles' (path: {p:?}) must be of type bool: {u:?}",
+                        p = path, u = usefiles))),
+            None => true,
+        };
+
+        let completion_kind = CompKind::Arg(Arg::new(kind, required, usefiles));
+        let desc = try!(toml
+            .get("description")
+            .ok_or(format!(
+                "option missing required key 'description' (path: {p:?})",
+                p = path))
+            .and_then(|desc| desc.as_str().ok_or(format!(
+                "value for 'description' (path: {p:?}) must be str: {d:?}",
+                p = path, d = desc)))
+            .map(|desc| desc.to_string()));
+
+        Ok(Self::new(cmd, path, completion_kind, desc))
     }
 
     fn build_opt(cmd: String, path: Vec<String>, toml: &toml::Table)
@@ -183,21 +235,49 @@ impl Completion {
         let mut result = Vec::new();
 
         for (key, value) in toml.iter() {
+            let value = try!(value
+                .as_table()
+                .ok_or(format!(
+                    "command {k:?} must map to a table structure, not: {t:?}",
+                    k = key, t = value)));
             if let Some(name) = key.split(".").next() {
                 let name = name;
                 let subcmds: Vec<String> = key
                     .split(".").map(|x| x.to_string()).collect();
-                if let Some(options) = value.as_table()
-                    .and_then(|t| t.get("option")).and_then(|s| s.as_slice()) {
 
+                if let Some(options) = value.get("option") {
+                    let options = try!(options
+                        .as_slice()
+                        .ok_or(format!(
+                            "use [[double-bracketed]] lists to define option at {k:?}",
+                            k = key)));
                     for option in options {
                         let option: CompResult<Self> = option.as_table()
-                            .ok_or(format!("Options must be table-structures"))
+                            .ok_or(format!("options must be table-structures"))
                             .and_then(|o| {
                                 Self::build_opt(name.to_string(), subcmds.clone(), o)
                             });
                         match option {
                             Ok(option) => result.push(option),
+                            Err(err) => return Err(err),
+                        }
+                    }
+                }
+
+                if let Some(args) = value.get("argument") {
+                    let args = try!(args
+                        .as_slice()
+                        .ok_or(format!(
+                            "use [[double bracketed]] lists to defined argument at {k:?}",
+                            k = key)));
+                    for argument in args {
+                        let argument: CompResult<Self> = argument.as_table()
+                            .ok_or(format!("arguments must be table-structures"))
+                            .and_then(|a| {
+                                Self::build_arg(name.to_string(), subcmds.clone(), a)
+                            });
+                        match argument {
+                            Ok(argument) => result.push(argument),
                             Err(err) => return Err(err),
                         }
                     }
@@ -237,6 +317,26 @@ pub mod tests {
     }
 
     #[test]
+    fn completion_arg_from_toml() {
+        let toml = toml::Parser::new("
+            [[prog.argument]]
+            kind = 'FILE'
+            description = 'arg'").parse().expect("TOML could not be parsed");
+        let completions = Completion::from_toml(&toml).unwrap();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].command, "prog".to_string());
+        assert_eq!(completions[0].path, vec!["prog".to_string()]);
+        assert_eq!(completions[0].description, "arg".to_string());
+        if let CompKind::Arg(ref arg) = completions[0].completion_kind {
+            assert_eq!(arg.required, false);
+            assert_eq!(arg.usefiles, true);
+            assert_eq!(arg.kind, ArgKind::File);
+        } else {
+            panic!("Wrong CompKind returned");
+        }
+    }
+
+    #[test]
     fn parse_argkind() {
         let kind = Arg::parse_argkind("FILE").unwrap();
         assert_eq!(kind, ArgKind::File);
@@ -244,6 +344,10 @@ pub mod tests {
         assert_eq!(kind, ArgKind::File);
         let kind = Arg::parse_argkind("FILE+").unwrap();
         assert_eq!(kind, ArgKind::FilePlus);
+        let kind = Arg::parse_argkind("anything").unwrap();
+        assert_eq!(kind, ArgKind::Anything);
+        let kind = Arg::parse_argkind("separator").unwrap();
+        assert_eq!(kind, ArgKind::Separator);
         let kind = Arg::parse_argkind("oneof(a b c)").unwrap();
         assert_eq!(kind, ArgKind::OneOf(
             vec!["a".to_string(), "b".to_string(), "c".to_string()]));
