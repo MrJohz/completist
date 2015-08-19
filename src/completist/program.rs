@@ -1,8 +1,9 @@
 use std::ascii::AsciiExt;
 extern crate regex;
 extern crate shlex;
+extern crate toml;
 
-type CompResult<'a, T> = Result<T, String>;
+pub type CompResult<'a, T> = Result<T, String>;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ArgKind {
@@ -17,7 +18,17 @@ pub enum ArgKind {
 pub struct Opt {
     longs: Vec<String>,
     shorts: Vec<String>,
-    argument: Arg,
+    argument: Option<Arg>,
+}
+
+impl Opt {
+    pub fn new(longs: Vec<String>, shorts: Vec<String>, argument: Option<Arg>) -> Self {
+        Opt {
+            longs: longs,
+            shorts: shorts,
+            argument: argument,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -110,11 +121,91 @@ impl Completion {
             description: desc,
         }
     }
+
+    fn build_arg(cmd: String, path: Vec<String>, toml: &toml::Table)
+        -> CompResult<Self> {
+
+        Err("incomplete!".to_string())
+    }
+
+    fn build_opt(cmd: String, path: Vec<String>, toml: &toml::Table)
+        -> CompResult<Self> {
+
+        let mut longs = Vec::new();
+        let mut shorts = Vec::new();
+
+        match toml.get("long") {
+            Some(l) => {
+                longs.push(try!(l.as_str()
+                    .map(|l| l.to_string())
+                    .ok_or(format!(
+                        "value for 'short' (path: {p:?}) must be of type str: {l:?}",
+                        p = path, l = l))));
+            }
+            None => {},
+        };
+
+        match toml.get("short") {
+            Some(s) => {
+                shorts.push(try!(s.as_str()
+                    .map(|s| s.to_string())
+                    .ok_or(format!(
+                        "value for 'short' (path: {p:?}) must be of type str: {s:?}",
+                        p = path, s = s))));
+            },
+            None => {},
+        }
+
+        Err(format!("incomplete"))
+    }
+
+    pub fn from_toml(toml: &toml::Table) -> CompResult<Vec<Self>> {
+        let mut result = Vec::new();
+
+        for (key, value) in toml.iter() {
+            if let Some(name) = key.split(".").next() {
+                let name = name;
+                let subcmds: Vec<String> = key
+                    .split(".").map(|x| x.to_string()).collect();
+                if let Some(options) = value.as_table()
+                    .and_then(|t| t.get("option")).and_then(|s| s.as_slice()) {
+
+                    for option in options {
+                        let option: CompResult<Self> = option.as_table()
+                            .ok_or(format!("Options must be table-structures"))
+                            .and_then(|o| {
+                                Self::build_opt(name.to_string(), subcmds.clone(), o)
+                            });
+                        match option {
+                            Ok(option) => result.push(option),
+                            Err(err) => return Err(err),
+                        }
+                    }
+                }
+
+            } else {
+                return Err(format!("Invalid command key: {}", key));
+            }
+        }
+
+        Ok(result)
+    }
 }
 
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    extern crate toml;
+
+    #[test]
+    fn completion_from_toml() {
+        let toml = toml::Parser::new("
+            [[prog.option]]
+            long = '--lib'
+            description = 'option'").parse().expect("TOML could not be parsed");
+        let completions = Completion::from_toml(&toml).unwrap();
+        assert_eq!(completions.len(), 1)
+    }
 
     #[test]
     fn parse_argkind() {
@@ -130,6 +221,9 @@ pub mod tests {
         let kind = Arg::parse_argkind("one_of(a b c)").unwrap();
         assert_eq!(kind, ArgKind::OneOf(
             vec!["a".to_string(), "b".to_string(), "c".to_string()]));
+        let kind = Arg::parse_argkind(r#"one_of('a' "b" '')"#).unwrap();
+        assert_eq!(kind, ArgKind::OneOf(
+            vec!["a".to_string(), "b".to_string(), "".to_string()]));
         let kind = Arg::parse_argkind("on_e_of(a b c d)");
         assert!(kind.is_err());
         let kind = Arg::parse_argkind("function(a b c d)").unwrap();
